@@ -1,0 +1,30 @@
+services:
+  backend:
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      IDCARD_DETECTOR_PATH: /models/yolov8s-detect.pt
+      IDCARD_FACE_MODEL_PATH: /models/yolov8n-face.pt
+      IDCARD_TEMPLATE_DIR: /templates
+      IDCARD_DEVICE: cpu
+      IDCARD_MATCH_THRESHOLD: "0.8"
+    volumes:
+      - ./training/model:/models:ro
+      - ./training/template_samples:/templates:ro
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      start_period: 90s
+      retries: 5
+  frontend:
+    build: ./frontend
+    ports:
+      - "127.0.0.1:8080:80"
+    depends_on:
+      backend:
+        condition: service_healthy

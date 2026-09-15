@@ -1,0 +1,13 @@
+.git
+.venv
+**/__pycache__
+**/.pytest_cache
+frontend
+artifacts
+.env
+training/model
+training/template_samples
+training/test_images
+training/datasets
+training/yolo_training_report
+training/*.png
