@@ -164,8 +164,9 @@ All matching entry points default to `DEFAULT_MATCH_THRESHOLD = 0.8`.
 `classify(...)` retains its index-only return;
 `classify_with_score(...)` exposes the accepted index and best score together.
 
-Templates are loaded as RGB and resized to `CARD_SIZE`; loading does not run the
-face detector. `load_templates(template_dir, card_size=CARD_SIZE)` no longer
+Templates are loaded as RGB, normalized to `CARD_SIZE`, then downsampled to
+`MATCH_SIZE` with OpenCV INTER_AREA once at loading. Loading does not run the
+face detector. `load_templates(template_dir, card_size=MATCH_SIZE)` no longer
 takes a face model. The face model is still required to mask the extracted input
 card before comparison. Use the same black-mask convention for reference images.
 When saving RGB arrays with OpenCV, convert them with
@@ -186,14 +187,17 @@ Full-resolution RGB input â†’ YOLO OBB â†’ expanded temporary perspect
 Sizes are `(width, height)`: the final RGB array has shape `(400, 600, 3)`.
 `REFINEMENT_SIZE = (600, 400)` sets the edge/Hough working scale;
 `CARD_SIZE = (600, 400)` controls extraction and reference normalization.
+`MATCH_SIZE = (300, 200)` controls matching only. The extracted card is face-masked
+before downsampling; the returned display card remains unmasked at 600 x 400.
+The 0.8 threshold is unchanged; validation on incorrect/nonmatching cards remains future work.
 The detector still performs its own internal input preparation. Its settings,
 first-OBB choice, RGB convention, 5% crop expansion, and strict `0.8` matching
 threshold are unchanged. No models or template image files are rewritten.
 
 ```python
-from training.detection import CARD_SIZE, analyze_card, load_templates, load_image
+from training.detection import MATCH_SIZE, analyze_card, load_templates, load_image
 
-templates = load_templates(ROOT / 'template_samples', card_size=CARD_SIZE)
+templates = load_templates(ROOT / 'template_samples', card_size=MATCH_SIZE)
 image = load_image(ROOT / 'test_images/image6.png')  # No whole-photo resize.
 result = analyze_card(detector, image, templates, face_detector)
 ```

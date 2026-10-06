@@ -29,7 +29,7 @@ def test_template_identity_stays_associated_with_loaded_pixels(tmp_path):
         loader.return_value.eval.side_effect = [detector, face]
         pipeline = IDCardPipeline(Settings(detector_path=model, face_model_path=model, template_dir=tmp_path))
     assert [template.id for template in pipeline.templates] == ['Template B.png', 'Template A.png']
-    assert all(image.shape == (400, 600, 3) for image in pipeline._images)
+    assert all(image.shape == (200, 300, 3) for image in pipeline._images)
     assert pipeline._images[0][0, 0].tolist() == [30, 80, 120]
     detector.predict.assert_not_called()
     face.predict.assert_not_called()

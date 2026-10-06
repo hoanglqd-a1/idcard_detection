@@ -52,7 +52,7 @@ class OriginalExtractionTests(unittest.TestCase):
         original = self.image.copy()
         model = self.model()
         with patch.object(detection, 'document_corners', return_value=self.refinement_points()) as refine:
-            result = detection.analyze_card(model, self.image, [expected], self.face)
+            result = detection.analyze_card(model, self.image, [cv2.resize(expected, detection.MATCH_SIZE, interpolation=cv2.INTER_AREA)], self.face)
         model.assert_called_once_with(self.image)
         self.assertEqual(refine.call_args.args[0].shape, (400, 600, 3))
         np.testing.assert_allclose(result.refined_corners, self.refined, atol=1e-4)
@@ -63,6 +63,18 @@ class OriginalExtractionTests(unittest.TestCase):
         self.assertEqual(result.status, detection.DetectionStatus.MATCHED)
         self.assertEqual(result.template_index, 0)
         self.assertAlmostEqual(result.match_score, 1, places=5)
+
+    def test_matching_downsamples_after_masking_without_changing_display_card(self):
+        masked = np.zeros((400, 600, 3), dtype=np.uint8)
+        masked[75:275, 120:420] = 180
+        with patch.object(detection, 'document_corners', return_value=self.refinement_points()), \
+             patch.object(detection, 'remove_face', return_value=masked) as mask, \
+             patch.object(detection, 'classify_with_score', return_value=(None, 0.7)) as classify:
+            result = detection.analyze_card(self.model(), self.image, [], self.face)
+        self.assertIs(mask.call_args.args[1], result.card)
+        self.assertEqual(result.card.shape, (400, 600, 3))
+        np.testing.assert_array_equal(classify.call_args.args[0],
+                                      cv2.resize(masked, (300, 200), interpolation=cv2.INTER_AREA))
 
     def test_refinement_failure_does_not_fall_back_to_yolo_crop(self):
         with patch.object(detection, 'document_corners', return_value=None):
@@ -85,7 +97,7 @@ class OriginalExtractionTests(unittest.TestCase):
                 self.assertIsNone(result.card)
 
     def test_incorrect_template_size_is_a_configuration_error(self):
-        with self.assertRaisesRegex(ValueError, '600x400'):
+        with self.assertRaisesRegex(ValueError, '300x200'):
             detection.analyze_card(self.model(), self.image,
                                   [np.zeros((320, 640, 3), dtype=np.uint8)], self.face)
 

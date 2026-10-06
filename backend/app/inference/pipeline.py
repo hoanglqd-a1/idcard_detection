@@ -7,8 +7,7 @@ from typing import Protocol
 
 import numpy as np
 
-from training.detection import CARD_SIZE, IMAGE_EXTENSIONS, DetectionResult, analyze_card
-from training.utils.processing import load_image
+from training.detection import IMAGE_EXTENSIONS, DetectionResult, analyze_card, load_template
 
 from ..config import Settings
 
@@ -40,7 +39,7 @@ class IDCardPipeline:
         if not paths:
             raise ValueError('At least one pre-masked reference template is required')
         self.templates = [TemplateIdentity(path.name, path.stem) for path in paths]
-        self._images = [load_image(path, CARD_SIZE) for path in paths]
+        self._images = [load_template(path) for path in paths]
 
         from ultralytics import YOLO
 

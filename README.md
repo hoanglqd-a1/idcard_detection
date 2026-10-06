@@ -72,10 +72,12 @@ Full-resolution RGB input -> first YOLO OBB -> expanded temporary crop
 -> resize temporary crop to 600 x 400 -> edge/Hough border refinement
 -> map refined corners back to the original image
 -> warp original pixels directly to 600 x 400
--> face masking -> normalized template correlation -> strict score > 0.8
+-> face masking -> downsample to 300 x 200 -> normalized template correlation -> strict score > 0.8
 ```
 
-Reference templates are normalized to 600 x 400 as well. Sizes are width by
+Reference templates are normalized to 600 x 400, then downsampled once to
+300 x 200 with INTER_AREA. The masked query uses the same downsampling.
+The returned card stays 600 x 400. Sizes are width by
 height. YOLO performs its own internal input preparation; the API no longer
 resizes the whole uploaded image before detection.
 
@@ -284,9 +286,11 @@ samples produced these local CPU smoke-test results:
 
 | Sample | Similarity | Result at `score > 0.8` |
 | --- | --- | --- |
-| `image553.png` | 0.812792 | Matched Template 5 |
-| `image6.png` | 0.855691 | Matched Template 0 |
+| `image553.png` | 0.836657 | Matched Template 5 |
+| `image6.png` | 0.867860 | Matched Template 0 |
 
+These results use 300 x 200 matching. The 0.8 threshold is unchanged; validation
+on incorrect/nonmatching cards is deferred.
 These are two sample observations, not an accuracy evaluation or a latency
 benchmark. Border refinement can still select an inner line and clip content;
 the coordinate mapping preserves the selected boundary rather than correcting it.

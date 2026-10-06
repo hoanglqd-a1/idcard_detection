@@ -37,6 +37,7 @@ if TYPE_CHECKING:
 ROOT = Path(__file__).resolve().parent
 REFINEMENT_SIZE = (600, 400)  # OpenCV sizes are (width, height).
 CARD_SIZE = (600, 400)
+MATCH_SIZE = (300, 200)
 DEFAULT_MATCH_THRESHOLD = 0.8
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.bmp', '.tif', '.tiff', '.webp'}
 
@@ -116,8 +117,13 @@ def remove_face(model: 'YOLO', card: np.ndarray):
     return apply_mask(card, mask)
 
 
+def load_template(path: str | Path, matching_size: tuple[int, int] = MATCH_SIZE) -> np.ndarray:
+    """Normalize a pre-masked RGB reference, then downsample as in matching."""
+    return cv2.resize(load_image(path, CARD_SIZE), matching_size, interpolation=cv2.INTER_AREA)
+
+
 def load_templates(
-    template_dir: str | Path, card_size: tuple[int, int] = CARD_SIZE,
+    template_dir: str | Path, card_size: tuple[int, int] = MATCH_SIZE,
 ) -> list[np.ndarray]:
     """Load pre-masked templates as RGB and resize for comparison.
 
@@ -126,7 +132,7 @@ def load_templates(
     """
     paths = (Path(template_dir) / name for name in os.listdir(template_dir))
     return [
-        load_image(path, card_size)
+        load_template(path, card_size)
         for path in paths
         if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
     ]
@@ -174,16 +180,16 @@ def analyze_card(
 ) -> DetectionResult:
     """Detect, refine and match a card from a full-resolution RGB image.
 
-    Templates use 600x400 pixels. Border refinement uses a 600x400 temporary
+    Templates use 300x200 pixels. Border refinement uses a 600x400 temporary
     crop, but final pixels come directly from the input image.
     Retains model defaults, first-OBB selection and matching threshold.
     Model/configuration errors propagate instead of becoming normal outcomes.
     """
     if any(
-        template.shape != (CARD_SIZE[1], CARD_SIZE[0], 3)
+        template.shape != (MATCH_SIZE[1], MATCH_SIZE[0], 3)
         for template in templates
     ):
-        raise ValueError('Expected RGB templates sized 600x400 (width x height).')
+        raise ValueError('Expected RGB templates sized 300x200 (width x height).')
     started = perf_counter()
     results = detect_model(image)
     corners = _first_corners(results)
@@ -216,7 +222,8 @@ def analyze_card(
     except (ValueError, np.linalg.LinAlgError):
         return finish(DetectionStatus.EXTRACTION_FAILED, failure_stage='refinement')
     masked_card = remove_face(face_model, card)
-    label, score = classify_with_score(masked_card, templates, threshold)
+    matching_card = cv2.resize(masked_card, MATCH_SIZE, interpolation=cv2.INTER_AREA)
+    label, score = classify_with_score(matching_card, templates, threshold)
     return finish(
         DetectionStatus.MATCHED if label is not None else DetectionStatus.UNMATCHED,
         card=card, template_index=label, match_score=score,
@@ -226,8 +233,8 @@ def analyze_card(
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description='Detect and refine a card with existing model weights.')
-    parser.add_argument('--image', type=Path, default=ROOT / 'test_images' / 'image553.png')
-    parser.add_argument('--output', type=Path, default=ROOT / 'detected_card_v2.png')
+    parser.add_argument('--image', type=Path, default=ROOT / 'test_images' / 'image6.png')
+    parser.add_argument('--output', type=Path, default=ROOT / 'detected_card.png')
     args = parser.parse_args(argv)
     from ultralytics import YOLO
 

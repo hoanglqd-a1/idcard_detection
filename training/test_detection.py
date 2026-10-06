@@ -69,7 +69,8 @@ class DetectionTests(unittest.TestCase):
         face_model = Mock()
         face_model.predict.return_value = [SimpleNamespace(boxes=[])]
         card = detection.cv2.resize(self.image, detection.CARD_SIZE)
-        templates = [np.flip(card, axis=1).copy(), card.copy()]
+        matching_card = detection.cv2.resize(card, detection.MATCH_SIZE, interpolation=detection.cv2.INTER_AREA)
+        templates = [np.flip(matching_card, axis=1).copy(), matching_card.copy()]
         for threshold, matched in ((0.8, True), (1.0, False)):
             with self.subTest(threshold=threshold), patch.object(
                 detection, 'document_corners', return_value=np.array([[0, 0], [639, 0], [639, 319], [0, 319]]),
