@@ -4,6 +4,7 @@ Images loaded by this module use RGB channel order. Labels are template indices.
 """
 
 import os
+import argparse
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -18,19 +19,24 @@ if __package__:
         apply_mask, auto_canny, convert_rec2corners, crop_image, document_detect,
         draw_lines, expand_corners, extract_card, find_intersections, get_lines,
         load_image,
+        crop_image_with_matrix, document_corners, four_point_transform_with_matrix,
+        map_points, resize_transform,
     )
 else:  # Preserve direct execution: python training/detection.py.
     from utils.processing import (
         apply_mask, auto_canny, convert_rec2corners, crop_image, document_detect,
         draw_lines, expand_corners, extract_card, find_intersections, get_lines,
         load_image,
+        crop_image_with_matrix, document_corners, four_point_transform_with_matrix,
+        map_points, resize_transform,
     )
 
 if TYPE_CHECKING:
     from ultralytics import YOLO
 
 ROOT = Path(__file__).resolve().parent
-CARD_SIZE = (640, 320)  # OpenCV sizes are (width, height).
+REFINEMENT_SIZE = (600, 400)  # OpenCV sizes are (width, height).
+CARD_SIZE = (600, 400)
 DEFAULT_MATCH_THRESHOLD = 0.8
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.bmp', '.tif', '.tiff', '.webp'}
 
@@ -48,6 +54,8 @@ class DetectionResult:
 
     Corners are the detector's unexpanded OBB in input-image pixel coordinates,
     not the refined crop's boundary. Card is the unmasked RGB extraction.
+    refined_corners contains the refined boundary in input-image coordinates
+    after successful extraction; it is None when extraction fails.
     match_score is normalized correlation (-1..1), not a probability; it is
     retained even below threshold. None means matching was not performed or
     no templates were available. template_index uses the supplied list order.
@@ -61,6 +69,7 @@ class DetectionResult:
     match_score: float | None = None
     failure_stage: Literal['crop', 'refinement'] | None = None
     processing_time_ms: float = 0.0
+    refined_corners: np.ndarray | None = None
 
     @property
     def card_detected(self) -> bool:
@@ -163,13 +172,18 @@ def analyze_card(
     detect_model: 'YOLO', image: np.ndarray, templates: Sequence[np.ndarray],
     face_model: 'YOLO', threshold: float = DEFAULT_MATCH_THRESHOLD,
 ) -> DetectionResult:
-    """Run the existing pipeline with richer outcomes and elapsed wall time.
+    """Detect, refine and match a card from a full-resolution RGB image.
 
-    Supply an RGB array and already loaded models/templates. No additional
-    input resize is applied. Preserve first-OBB selection, model defaults,
-    preprocessing and strict matching threshold. Model/configuration errors
-    propagate so callers can distinguish internal errors from normal outcomes.
+    Templates use 600x400 pixels. Border refinement uses a 600x400 temporary
+    crop, but final pixels come directly from the input image.
+    Retains model defaults, first-OBB selection and matching threshold.
+    Model/configuration errors propagate instead of becoming normal outcomes.
     """
+    if any(
+        template.shape != (CARD_SIZE[1], CARD_SIZE[0], 3)
+        for template in templates
+    ):
+        raise ValueError('Expected RGB templates sized 600x400 (width x height).')
     started = perf_counter()
     results = detect_model(image)
     corners = _first_corners(results)
@@ -185,36 +199,51 @@ def analyze_card(
 
     if corners is None:
         return finish(DetectionStatus.NO_CARD)
+    refined_corners = None
     try:
-        cropped = crop_image(image, corners)
+        cropped, original_to_crop = crop_image_with_matrix(image, corners)
     except ValueError:
         return finish(DetectionStatus.EXTRACTION_FAILED, failure_stage='crop')
-    cropped = cv2.resize(cropped, CARD_SIZE)
-    card = document_detect(cropped)
-    if card is None:
+    crop_size = (cropped.shape[1], cropped.shape[0])
+    working = cv2.resize(cropped, REFINEMENT_SIZE)
+    refined = document_corners(working)
+    if refined is None:
         return finish(DetectionStatus.EXTRACTION_FAILED, failure_stage='refinement')
-    card = cv2.resize(card, CARD_SIZE)
+    try:
+        original_to_working = resize_transform(crop_size, REFINEMENT_SIZE) @ original_to_crop
+        refined_corners = map_points(refined, np.linalg.inv(original_to_working))
+        card, _ = four_point_transform_with_matrix(image, refined_corners, CARD_SIZE)
+    except (ValueError, np.linalg.LinAlgError):
+        return finish(DetectionStatus.EXTRACTION_FAILED, failure_stage='refinement')
     masked_card = remove_face(face_model, card)
     label, score = classify_with_score(masked_card, templates, threshold)
     return finish(
         DetectionStatus.MATCHED if label is not None else DetectionStatus.UNMATCHED,
         card=card, template_index=label, match_score=score,
+        refined_corners=refined_corners,
     )
 
 
-def main():
+def main(argv=None):
+    parser = argparse.ArgumentParser(description='Detect and refine a card with existing model weights.')
+    parser.add_argument('--image', type=Path, default=ROOT / 'test_images' / 'image553.png')
+    parser.add_argument('--output', type=Path, default=ROOT / 'detected_card_v2.png')
+    args = parser.parse_args(argv)
     from ultralytics import YOLO
 
     detect_model = YOLO(str(ROOT / 'model' / 'yolov8s-detect.pt')).eval()
     face_model = YOLO(str(ROOT / 'model' / 'yolov8n-face.pt')).eval()
     templates = load_templates(ROOT / 'template_samples')
-    image = load_image(ROOT / 'test_images' / 'image6.png', CARD_SIZE)
-    card, label = detect_card(detect_model, image, templates, face_model)
-    print('Detected card label:', label)
+    image = load_image(args.image)
+    result = analyze_card(detect_model, image, templates, face_model)
+    card = result.card
+    print('Status:', result.status.value)
+    print('Detected card label:', result.template_index)
+    print('Template similarity:', result.match_score)
     if card is None:
         print('No card could be extracted.')
         return
-    output_path = ROOT / 'detected_card.png'
+    output_path = args.output
     if not cv2.imwrite(str(output_path), cv2.cvtColor(card, cv2.COLOR_RGB2BGR)):
         raise OSError(f'Could not save the detected card to {output_path}')
 

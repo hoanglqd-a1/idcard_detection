@@ -1,7 +1,7 @@
-# CardScope · Document vision lab
+# CardScope Â· Document vision lab
 
 A small computer vision application that turns trained card-detection weights
-into an interactive upload → detection → extraction → reference-matching workflow.
+into an interactive upload â†’ detection â†’ extraction â†’ reference-matching workflow.
 Built as an AI / Computer Vision Engineer portfolio project.
 
 ![CardScope upload interface](docs/ui-preview.png)
@@ -38,7 +38,7 @@ flowchart TD
     Proxy --> API[FastAPI /api/v1/analyze]
     API --> Validation[Decode and validate image]
     Validation --> Service[Analysis service]
-    Service --> Adapter[IDCardPipeline · shared models + lock]
+    Service --> Adapter[IDCardPipeline Â· shared models + lock]
     Adapter --> Legacy[Existing training/detection.py]
     Legacy --> Detect[YOLO oriented card detection]
     Detect --> Crop[Perspective crop + border refinement]
@@ -58,34 +58,39 @@ model conversion or retraining was performed for the application.
 | --- | --- |
 | `training/model/yolov8s-detect.pt` | YOLO OBB card detector; class `card` |
 | `training/model/yolov8n-face.pt` | Face pose model; only its face bounding boxes are used |
-| `training/template_samples/Template 0.jpg` … `Template 9.jpg` | Pre-masked reference images |
+| `training/template_samples/Template 0.jpg` â€¦ `Template 9.jpg` | Pre-masked reference images |
 
 The checkpoint filenames do not fully describe their model tasks. Startup checks
 the actual loaded tasks and fails clearly for missing/incompatible assets or an
 empty template directory. Model paths are checked before invoking YOLO, preventing
 automatic substitution/download of missing weights.
 
-The current sequence is deliberately preserved:
+The training CLI and backend share one original-image pipeline:
 
 ```text
-RGB input → PIL resize to 640 × 320 → first YOLO OBB
-→ expanded perspective crop → resize to 640 × 320
-→ edge/Hough-line border refinement → resize to 640 × 320
-→ face masking → normalized template correlation → strict score > 0.8
+Full-resolution RGB input -> first YOLO OBB -> expanded temporary crop
+-> resize temporary crop to 600 x 400 -> edge/Hough border refinement
+-> map refined corners back to the original image
+-> warp original pixels directly to 600 x 400
+-> face masking -> normalized template correlation -> strict score > 0.8
 ```
+
+Reference templates are normalized to 600 x 400 as well. Sizes are width by
+height. YOLO performs its own internal input preparation; the API no longer
+resizes the whole uploaded image before detection.
 
 The input face boxes are expanded by 30% and blacked out for matching. Returned
 card images retain the face. Reference images are loaded directly without running
 the face model again. Template IDs are filenames and display names are file stems;
 the service binds each identity to its array using one directory listing, retaining
-legacy tie-breaking order. There are no verified document-type names.
+existing tie-breaking order. There are no verified document-type names.
 
-The API retains legacy RGB NumPy inputs even though [Ultralytics documents BGR for
+The API retains the existing RGB NumPy inputs even though [Ultralytics documents BGR for
 NumPy sources](https://docs.ultralytics.com/modes/predict/). Correcting that convention
-and changing resizing are deferred experiments: either could change results.
+is deferred because it could change results.
 Original-preview geometry accounts for EXIF orientation without changing the
-pixels sent into inference. Coordinates describe the initial OBB, not the refined
-card boundary. No fallback crop is substituted when refinement fails.
+pixels sent into inference. Coordinates describe the refined card boundary when available, or the initial
+OBB when extraction fails. No fallback crop is substituted when refinement fails.
 
 ## Project structure
 
@@ -248,6 +253,7 @@ when sent without a Content-Length header.
 Windows commands from the root (substitute `.venv/bin/python` on Linux/macOS):
 
 ```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s training -p 'test*extraction.py' -v
 .\.venv\Scripts\python.exe -m unittest discover -s training -p test_detection.py -v
 .\.venv\Scripts\python.exe -m pytest backend/tests -q
 .\.venv\Scripts\python.exe -m backend.smoke
@@ -268,43 +274,22 @@ is unavailable, install Playwright Chromium and change `channel` in
 `frontend/playwright.config.ts` to `chromium`.
 
 Unit tests use mocked models for deterministic outcomes. The separate real-weight
-smoke check compares legacy and wrapped inference labels and crop pixels, then
+smoke check compares training and serving inference labels and crop pixels, then
 exercises response encoding. It writes local crops and JSON to ignored
 `artifacts/smoke/`. Those artifacts may contain document information; they are
 not bundled into the frontend.
 
-Observed locally on 2026-09-11 with CPU inference, Ultralytics 8.4.147, and the
-current supplied weights/references:
-
-| Sample | Detected / extracted | Best similarity | Result | Legacy crop/label parity |
-| --- | --- | --- | --- | --- |
-| `image553.png` | Yes / yes | 0.784922 | No reference template matched | Passed |
-| `image6.png` | Yes / yes | 0.697863 | No reference template matched | Passed |
-
-These are two smoke-test observations, not an accuracy evaluation or latency
-benchmark. Neither exceeded the original strict `0.8` threshold.
-
-On 2026-09-12, the default threshold was lowered to `0.7` and both images were
-uploaded through the running Docker application's API:
-
-| Sample | Similarity | Result at `score > 0.7` |
-| --- | --- | --- |
-| `image553.png` | 0.784922 | Matched Template 5 |
-| `image6.png` | 0.697863 | No reference template matched |
-
-The scores did not change; only the acceptance threshold changed. A reference
-match is not an independently verified document-type classification.
-
-After the reference template colors were corrected, the default was restored
-to `0.8` on 2026-09-12. Retesting through the running application produced:
+With original-image extraction and the corrected references, the supplied
+samples produced these local CPU smoke-test results:
 
 | Sample | Similarity | Result at `score > 0.8` |
 | --- | --- | --- |
-| `image553.png` | 0.800056 | Matched Template 5 |
-| `image6.png` | 0.877440 | Matched Template 0 |
+| `image553.png` | 0.812792 | Matched Template 5 |
+| `image6.png` | 0.855691 | Matched Template 0 |
 
-These observations use the corrected references; the tables above record the
-earlier reference versions. The first score is only slightly above the threshold.
+These are two sample observations, not an accuracy evaluation or a latency
+benchmark. Border refinement can still select an inner line and clip content;
+the coordinate mapping preserves the selected boundary rather than correcting it.
 
 ## Limitations and future work
 

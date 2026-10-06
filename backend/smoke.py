@@ -1,4 +1,4 @@
-"""Run real weights and check serving parity with the legacy entry point.
+"""Run real weights and check serving parity with the training entry point.
 
 Run from the repository root: python -m backend.smoke
 Outputs are local, ignored artifacts; no recognition accuracy is inferred.
@@ -24,19 +24,21 @@ def main():
     for path in sorted((ROOT / 'training/test_images').glob('*.png')):
         data = path.read_bytes()
         working, _, _, _ = decode_image(data, settings)
-        legacy_card, legacy_label = detect_card(
+        direct_card, direct_label = detect_card(
             pipeline._detector, working, pipeline._images, pipeline._face_model,
             settings.match_threshold,
         )
         result = pipeline.predict(working)
-        assert result.template_index == legacy_label
-        if legacy_card is None:
+        assert result.template_index == direct_label
+        if direct_card is None:
             assert result.card is None
         else:
-            np.testing.assert_array_equal(result.card, legacy_card)
+            np.testing.assert_array_equal(result.card, direct_card)
+            assert result.card.shape == (400, 600, 3)
+            assert result.refined_corners is not None
             Image.fromarray(result.card).save(output / f'{path.stem}-crop.png')
         response = analyze_image(data, pipeline, settings)
-        report = {'sample': path.name, 'legacy_parity': True,
+        report = {'sample': path.name, 'training_parity': True,
                   **response.model_dump(mode='json', exclude={'extracted_card'})}
         reports.append(report)
         print(json.dumps(report))

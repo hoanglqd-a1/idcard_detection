@@ -1,4 +1,4 @@
-"""Serving adapter for the unchanged training inference implementation."""
+"""Serving adapter for the shared original-image inference pipeline."""
 
 import os
 from dataclasses import dataclass

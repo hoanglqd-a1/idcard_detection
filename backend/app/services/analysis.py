@@ -5,7 +5,6 @@ from time import perf_counter
 import numpy as np
 from PIL import Image, UnidentifiedImageError
 
-from training.detection import CARD_SIZE
 from training.utils.processing import load_image
 
 from ..config import Settings
@@ -35,8 +34,8 @@ def decode_image(data: bytes, settings: Settings) -> tuple[np.ndarray, int, int,
                 raise AnalysisError(415, 'animated_image', 'Upload a single still image.')
             source.verify()
         with Image.open(BytesIO(data)) as source:
-            # Match legacy input resizing and channel handling exactly.
-            working = load_image(BytesIO(data), CARD_SIZE)
+            # Preserve original raster pixels; orient only the browser overlay.
+            working = load_image(BytesIO(data))
             orientation = source.getexif().get(274, 1)
         return working, width, height, orientation
     except (Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
@@ -62,9 +61,9 @@ def analyze_image(data: bytes, pipeline: Pipeline, settings: Settings) -> Analyz
     working, width, height, orientation = decode_image(data, settings)
     result = pipeline.predict(working)
     corners = None
-    if result.corners is not None:
-        corners = [display_point(x * width / CARD_SIZE[0], y * height / CARD_SIZE[1],
-                                 width, height, orientation) for x, y in result.corners]
+    boundary = result.refined_corners if result.refined_corners is not None else result.corners
+    if boundary is not None:
+        corners = [display_point(x, y, width, height, orientation) for x, y in boundary]
     extracted = None
     if result.card is not None:
         output = BytesIO()

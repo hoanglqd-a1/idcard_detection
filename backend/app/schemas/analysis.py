@@ -21,7 +21,10 @@ class AnalyzeResponse(BaseModel):
     match_score: float | None = Field(default=None, ge=-1, le=1)
     match_threshold: float
     is_supported: bool | None = None
-    corners: list[Point] | None = None
+    corners: list[Point] | None = Field(
+        default=None,
+        description='Refined boundary, or detected OBB if extraction fails, in EXIF-oriented preview pixels',
+    )
     image_width: int
     image_height: int
     extracted_card: str | None = Field(default=None, description='PNG data URL, unmasked RGB crop')

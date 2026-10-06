@@ -46,7 +46,7 @@ def test_startup_loads_once_and_health(api):
         assert response.json()['is_supported'] is None
     factory.assert_called_once()
     assert pipeline.predict.call_count == 2
-    assert pipeline.predict.call_args.args[0].shape == (320, 640, 3)
+    assert pipeline.predict.call_args.args[0].shape == (640, 1280, 3)
 
 
 @pytest.mark.parametrize('status,has_crop,index', [
@@ -56,9 +56,10 @@ def test_startup_loads_once_and_health(api):
 ])
 def test_outcomes_geometry_and_rgb_crop(api, status, has_crop, index):
     client, pipeline, _ = api
-    crop = np.full((320, 640, 3), (200, 50, 10), dtype=np.uint8) if has_crop else None
+    crop = np.full((400, 600, 3), (200, 50, 10), dtype=np.uint8) if has_crop else None
     pipeline.predict.return_value = DetectionResult(
         status=status, card=crop, corners=np.array([[10, 20], [600, 20], [600, 300], [10, 300]]),
+        refined_corners=np.array([[12, 22], [598, 22], [598, 298], [12, 298]]) if has_crop else None,
         detection_confidence=0.95, template_index=index,
         match_score=0.9 if index is not None else 0.6 if has_crop else None,
         failure_stage=None if has_crop else 'refinement', processing_time_ms=1.0,
@@ -67,7 +68,7 @@ def test_outcomes_geometry_and_rgb_crop(api, status, has_crop, index):
     assert response.status_code == 200, response.text
     body = response.json()
     assert body['status'] == status.value
-    assert body['corners'][0] == {'x': 20, 'y': 40}
+    assert body['corners'][0] == ({'x': 12, 'y': 22} if has_crop else {'x': 10, 'y': 20})
     assert body['card_detected'] is True
     assert body['template_id'] == ('Template 3.jpg' if index is not None else None)
     assert body['is_supported'] == (index is not None if has_crop else None)
@@ -77,12 +78,13 @@ def test_outcomes_geometry_and_rgb_crop(api, status, has_crop, index):
     if has_crop:
         import base64
         image = Image.open(BytesIO(base64.b64decode(body['extracted_card'].split(',')[1])))
+        assert image.size == (600, 400)
         assert image.getpixel((0, 0)) == (200, 50, 10)
     else:
         assert body['extracted_card'] is None
 
 
-def test_exif_overlay_keeps_legacy_inference_pixels(api):
+def test_exif_overlay_keeps_original_inference_pixels(api):
     client, pipeline, _ = api
     pipeline.predict.return_value = DetectionResult(
         DetectionStatus.EXTRACTION_FAILED, corners=np.array([[10, 20], [600, 20], [600, 300], [10, 300]]),
@@ -91,8 +93,8 @@ def test_exif_overlay_keeps_legacy_inference_pixels(api):
     body = response.json()
     assert body['image_width'] == 640
     assert body['image_height'] == 1280
-    assert body['corners'][0] == {'x': 599, 'y': 20}
-    assert pipeline.predict.call_args.args[0].shape == (320, 640, 3)
+    assert body['corners'][0] == {'x': 619, 'y': 10}
+    assert pipeline.predict.call_args.args[0].shape == (640, 1280, 3)
 
 
 @pytest.mark.parametrize('data,status', [(b'', 422), (b'not an image', 422), (image_bytes(format='GIF'), 415)])

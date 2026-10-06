@@ -90,7 +90,15 @@ Run:
 python detection.py
 ```
 
-The example in `main()` currently reads `test_images/image6.png`. Change that path to try another image. Successful extraction writes `detected_card.png` and prints the template label. If extraction fails, no new image is written; an older output file may still exist.
+The CLI reads `test_images/image553.png` at its original resolution. Successful
+extraction writes `detected_card_v2.png` and prints the status, template index,
+and similarity. Choose an image or destination:
+
+```bash
+python detection.py --image test_images/image6.png --output card.png
+```
+
+If extraction fails, no new image is written; an older output file may still exist.
 
 The pipeline detects an oriented card box, crops it, refines its border, masks faces for comparison, and selects the template with the highest normalized correlation above the threshold. Helpers use RGB images and `(width, height)` resize dimensions.
 
@@ -112,14 +120,14 @@ It does not load models or resize the input on entry. From the repository root:
 
 ```python
 from ultralytics import YOLO
-from training.detection import CARD_SIZE, ROOT, analyze_card, load_image, load_templates
+from training.detection import ROOT, analyze_card, load_image, load_templates
 
 # Initialize once and reuse for subsequent images.
 detector = YOLO(str(ROOT / 'model' / 'yolov8s-detect.pt')).eval()
 face_detector = YOLO(str(ROOT / 'model' / 'yolov8n-face.pt')).eval()
 templates = load_templates(ROOT / 'template_samples')
 
-image = load_image(ROOT / 'test_images' / 'image6.png', CARD_SIZE)
+image = load_image(ROOT / 'test_images' / 'image6.png')
 result = analyze_card(detector, image, templates, face_detector)
 print(result.status.value, result.template_index, result.match_score)
 ```
@@ -132,6 +140,7 @@ The returned `DetectionResult` contains:
 | `card_detected` | Whether the detector returned corners, even if extraction failed |
 | `card` | Unmasked rectified RGB NumPy array, or `None` |
 | `corners` | First detected OBB's four points in the supplied image's pixel coordinates |
+| `refined_corners` | Refined boundary in input-image coordinates after successful extraction; otherwise `None` |
 | `detection_confidence` | YOLO confidence for that OBB, or `None` |
 | `template_index` | Accepted template's list index, or `None` |
 | `match_score` | Best normalized correlation, retained for rejected matches; `None` if unavailable |
@@ -162,12 +171,53 @@ card before comparison. Use the same black-mask convention for reference images.
 When saving RGB arrays with OpenCV, convert them with
 `cv2.cvtColor(image, cv2.COLOR_RGB2BGR)` before `cv2.imwrite` to preserve colors.
 
+### Original-image extraction
+
+The shared training and backend pipeline preserves border refinement and samples the final card directly from
+the original image:
+
+```text
+Full-resolution RGB input â†’ YOLO OBB â†’ expanded temporary perspective crop
+-> resize temporary crop to 600 x 400 -> locate refined border corners
+â†’ invert resize and crop transforms â†’ refined corners in original image
+â†’ warp original image directly to 600 Ã— 400 â†’ face mask â†’ template matching
+```
+
+Sizes are `(width, height)`: the final RGB array has shape `(400, 600, 3)`.
+`REFINEMENT_SIZE = (600, 400)` sets the edge/Hough working scale;
+`CARD_SIZE = (600, 400)` controls extraction and reference normalization.
+The detector still performs its own internal input preparation. Its settings,
+first-OBB choice, RGB convention, 5% crop expansion, and strict `0.8` matching
+threshold are unchanged. No models or template image files are rewritten.
+
+```python
+from training.detection import CARD_SIZE, analyze_card, load_templates, load_image
+
+templates = load_templates(ROOT / 'template_samples', card_size=CARD_SIZE)
+image = load_image(ROOT / 'test_images/image6.png')  # No whole-photo resize.
+result = analyze_card(detector, image, templates, face_detector)
+```
+
+The crop helper exposes the homography for the **expanded** detector region.
+The refinement-to-original mapping inverts `resize_matrix @ crop_homography`,
+including OpenCV resize's pixel-center offsets. The final warp uses the original
+pixels, not the temporary refinement image. Failed refinement still returns
+`extraction_failed`; there is no automatic fallback to a YOLO-only crop.
+
+Run `python -m backend.smoke` from the repository root to check both supplied
+images with real weights and write crops/results to `artifacts/smoke/`.
+The previous two-mode comparison script has been removed.
+
+Border selection still uses the existing Hough-line grouping and intersection
+rules. It can select an inner edge and clip card content; original-resolution
+sampling improves detail but does not fix incorrect border selection.
+
 ## Tests
 
 With dependencies installed, run:
 
 ```bash
-python -m unittest test_download_dataset test_detection -v
+python -m unittest test_download_dataset test_detection test_original_extraction -v
 ```
 
 These tests use temporary data and mocked model/FTP calls. They do not download MIDV500, train a model, or measure real-world recognition accuracy.
@@ -178,5 +228,5 @@ The training workspace produces `model/yolov8s-detect.pt` for the inference serv
 The application reuses `analyze_card(...)`, exposes filename-based template
 identities, and displays detection and extraction results. Run `python -m
 backend.smoke` from the repository root to check real-model parity with the
-legacy entry point. See the [application README](../README.md) for API, frontend,
+training entry point. See the [application README](../README.md) for API, frontend,
 and container instructions.

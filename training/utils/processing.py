@@ -36,6 +36,14 @@ def order_points(pts):
 
 def four_point_transform(image, pts):
     """Warp a quadrilateral into a rectangle; reject degenerate corners."""
+    return four_point_transform_with_matrix(image, pts)[0]
+
+
+def four_point_transform_with_matrix(image, pts, output_size=None):
+    """Return the warped image and the source-to-output homography.
+
+    output_size is (width, height); omitted sizes use the measured edge lengths.
+    """
     rectangle = order_points(pts)
     top_left, top_right, bottom_right, bottom_left = rectangle
     width = int(max(np.linalg.norm(bottom_right - bottom_left),
@@ -44,11 +52,15 @@ def four_point_transform(image, pts):
                      np.linalg.norm(top_left - bottom_left)))
     if width < 2 or height < 2 or not cv2.isContourConvex(rectangle):
         raise ValueError('Corners must form a nondegenerate convex quadrilateral.')
+    if output_size is not None:
+        width, height = output_size
+        if width < 2 or height < 2:
+            raise ValueError('Output dimensions must each be at least two pixels.')
     destination = np.array([
         [0, 0], [width - 1, 0], [width - 1, height - 1], [0, height - 1],
     ], dtype=np.float32)
     transform = cv2.getPerspectiveTransform(rectangle, destination)
-    return cv2.warpPerspective(image, transform, (width, height))
+    return cv2.warpPerspective(image, transform, (width, height)), transform
 
 
 def check_validity(points, image_size):
@@ -93,8 +105,42 @@ def expand_corners(shape, corners, expand_rate=0.05):
 
 
 def crop_image(raw_image, corners, expand_rate=0.05):
+    return crop_image_with_matrix(raw_image, corners, expand_rate)[0]
+
+
+def crop_image_with_matrix(raw_image, corners, expand_rate=0.05):
+    """Return the expanded crop and its original-to-crop homography."""
     expanded = expand_corners(raw_image.shape, corners, expand_rate)
-    return four_point_transform(raw_image, expanded)
+    return four_point_transform_with_matrix(raw_image, expanded)
+
+
+def resize_transform(source_size, target_size):
+    """Map pixel centers through OpenCV resize; sizes are (width, height).
+
+    OpenCV's linear resize samples source coordinate (dst + 0.5) / scale - 0.5.
+    Include that half-pixel offset when projecting refined corners back.
+    """
+    if min(*source_size, *target_size) <= 0:
+        raise ValueError('Resize dimensions must be positive.')
+    scale_x = target_size[0] / source_size[0]
+    scale_y = target_size[1] / source_size[1]
+    return np.array([
+        [scale_x, 0, (scale_x - 1) / 2],
+        [0, scale_y, (scale_y - 1) / 2],
+        [0, 0, 1],
+    ], dtype=np.float64)
+
+
+def map_points(points, transform):
+    """Apply a homography to (x, y) points, rejecting points at infinity."""
+    points = np.asarray(points, dtype=np.float64)
+    transform = np.asarray(transform, dtype=np.float64)
+    if points.ndim != 2 or points.shape[1] != 2 or transform.shape != (3, 3):
+        raise ValueError('Expected Nx2 points and a 3x3 homography.')
+    projected = np.column_stack((points, np.ones(len(points)))) @ transform.T
+    if not np.isfinite(projected).all() or np.any(np.abs(projected[:, 2]) < 1e-12):
+        raise ValueError('Homography maps points to invalid coordinates.')
+    return projected[:, :2] / projected[:, 2:3]
 
 
 def extract_card(image, corners):
@@ -166,6 +212,18 @@ def get_lines(edges):
 
 def document_detect(cropped_image):
     """Refine a crop using border edges; return None when no valid crop exists."""
+    corners = document_corners(cropped_image)
+    if corners is None:
+        return None
+    return four_point_transform(cropped_image, corners)
+
+
+def document_corners(cropped_image):
+    """Locate refined TL/TR/BR/BL corners without resampling the crop.
+
+    Keep the existing edge/Hough settings and first-four-intersections rule.
+    Coordinates may extend beyond the crop, as in the original refinement.
+    """
     inverted = cv2.bitwise_not(cropped_image)
     gray = cv2.cvtColor(inverted, cv2.COLOR_RGB2GRAY)
     blurred = cv2.medianBlur(gray, 15)
@@ -177,8 +235,18 @@ def document_detect(cropped_image):
                   (width * 7 // 8, height * 7 // 8), 0, -1)
     lines = get_lines(apply_mask(edges, border_mask))
     corners = find_intersections(lines, cropped_image)[:4]
+    if len(corners) < 4:
+        return None
     try:
-        return extract_card(cropped_image, corners)
+        rectangle = order_points(np.asarray(corners, dtype=np.int32))
+        top_left, top_right, bottom_right, bottom_left = rectangle
+        width = int(max(np.linalg.norm(bottom_right - bottom_left),
+                        np.linalg.norm(top_right - top_left)))
+        height = int(max(np.linalg.norm(top_right - bottom_right),
+                         np.linalg.norm(top_left - bottom_left)))
+        if width < 2 or height < 2 or not cv2.isContourConvex(rectangle):
+            return None
+        return rectangle
     except ValueError:
         return None
 

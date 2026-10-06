@@ -47,10 +47,10 @@ class DetectionTests(unittest.TestCase):
     def test_extraction_failures_preserve_detection(self):
         for stage in ('crop', 'refinement'):
             with self.subTest(stage=stage):
-                with patch.object(detection, 'crop_image') as crop, patch.object(
-                    detection, 'document_detect', return_value=None,
+                with patch.object(detection, 'crop_image_with_matrix') as crop, patch.object(
+                    detection, 'document_corners', return_value=None,
                 ):
-                    crop.return_value = self.image
+                    crop.return_value = (self.image, np.eye(3))
                     if stage == 'crop':
                         crop.side_effect = ValueError('Degenerate corners')
                     result = detection.analyze_card(
@@ -64,7 +64,7 @@ class DetectionTests(unittest.TestCase):
                 self.assertIsNone(result.is_supported)
                 self.assertIsNone(result.match_score)
 
-    def test_matching_results_and_legacy_wrapper_agree(self):
+    def test_matching_results_and_tuple_wrapper_agree(self):
         # Exercise real OpenCV correlation; isolate geometric refinement only.
         face_model = Mock()
         face_model.predict.return_value = [SimpleNamespace(boxes=[])]
@@ -72,14 +72,14 @@ class DetectionTests(unittest.TestCase):
         templates = [np.flip(card, axis=1).copy(), card.copy()]
         for threshold, matched in ((0.8, True), (1.0, False)):
             with self.subTest(threshold=threshold), patch.object(
-                detection, 'document_detect', return_value=card,
-            ):
+                detection, 'document_corners', return_value=np.array([[0, 0], [639, 0], [639, 319], [0, 319]]),
+            ), patch.object(detection, 'four_point_transform_with_matrix', return_value=(card, np.eye(3))):
                 model = self.detected_model()
                 result = detection.analyze_card(
                     model, self.image, templates, face_model, threshold,
                 )
                 model.assert_called_once_with(self.image)
-                legacy_card, legacy_label = detection.detect_card(
+                wrapped_card, wrapped_label = detection.detect_card(
                     model, self.image, templates, face_model, threshold,
                 )
                 self.assertEqual(result.is_supported, matched)
@@ -89,8 +89,8 @@ class DetectionTests(unittest.TestCase):
                 self.assertAlmostEqual(result.match_score, 1.0, places=5)
                 self.assertEqual(result.detection_confidence, 0.95)
                 np.testing.assert_array_equal(result.card, card)
-                np.testing.assert_array_equal(legacy_card, result.card)
-                self.assertEqual(legacy_label, result.template_index)
+                np.testing.assert_array_equal(wrapped_card, result.card)
+                self.assertEqual(wrapped_label, result.template_index)
 
     def test_empty_templates_have_no_score(self):
         self.assertEqual(detection.classify_with_score(self.image, []), (None, None))
