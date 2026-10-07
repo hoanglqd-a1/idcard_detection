@@ -63,7 +63,6 @@ export default function App() {
         <span className="eyebrow">DOCUMENT INTELLIGENCE / 01</span>
         <h1>From an image<br />to a <span>clearer picture.</span></h1>
         <p>Detect a document card, straighten its perspective, and compare it with reference templates. Explore the vision pipeline, one image at a time.</p>
-        <div className="intro-tags"><span>Card detection</span><span>Perspective correction</span><span>Template matching</span></div>
       </section>
       <section className="workspace" aria-label="Document analysis workspace">
         <aside className="upload-panel">

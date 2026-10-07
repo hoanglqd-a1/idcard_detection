@@ -106,19 +106,6 @@ h1 span {
   font-size:15px;
   line-height:1.8
 }
-.intro-tags {
-  display:flex;
-  flex-wrap:wrap;
-  gap:9px;
-  margin-top:22px
-}
-.intro-tags span {
-  font-size:10px;
-  border:1px solid #d5ddd2;
-  border-radius:5px;
-  padding:5px 9px;
-  color:#6a796c
-}
 .workspace {
   background:#fff;
   border:1px solid #dce3d8;
