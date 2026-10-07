@@ -178,10 +178,10 @@ The shared training and backend pipeline preserves border refinement and samples
 the original image:
 
 ```text
-Full-resolution RGB input â†’ YOLO OBB â†’ expanded temporary perspective crop
+Full-resolution RGB input → YOLO OBB → expanded temporary perspective crop
 -> resize temporary crop to 600 x 400 -> locate refined border corners
-â†’ invert resize and crop transforms â†’ refined corners in original image
-â†’ warp original image directly to 600 Ã— 400 â†’ face mask â†’ template matching
+→ invert resize and crop transforms → refined corners in original image
+→ warp original image directly to 600 × 400 → face mask → template matching
 ```
 
 Sizes are `(width, height)`: the final RGB array has shape `(400, 600, 3)`.
