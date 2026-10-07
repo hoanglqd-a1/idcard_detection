@@ -1,7 +1,7 @@
-# CardScope Â· Document vision lab
+# CardScope · Document vision lab
 
 A small computer vision application that turns trained card-detection weights
-into an interactive upload â†’ detection â†’ extraction â†’ reference-matching workflow.
+into an interactive upload → detection → extraction → reference-matching workflow.
 Built as an AI / Computer Vision Engineer portfolio project.
 
 ![CardScope upload interface](docs/ui-preview.png)
@@ -38,7 +38,7 @@ flowchart TD
     Proxy --> API[FastAPI /api/v1/analyze]
     API --> Validation[Decode and validate image]
     Validation --> Service[Analysis service]
-    Service --> Adapter[IDCardPipeline Â· shared models + lock]
+    Service --> Adapter[IDCardPipeline · shared models + lock]
     Adapter --> Legacy[Existing training/detection.py]
     Legacy --> Detect[YOLO oriented card detection]
     Detect --> Crop[Perspective crop + border refinement]
@@ -58,7 +58,7 @@ model conversion or retraining was performed for the application.
 | --- | --- |
 | `training/model/yolov8s-detect.pt` | YOLO OBB card detector; class `card` |
 | `training/model/yolov8n-face.pt` | Face pose model; only its face bounding boxes are used |
-| `training/template_samples/Template 0.jpg` â€¦ `Template 9.jpg` | Pre-masked reference images |
+| `training/template_samples/Template 0.jpg` … `Template 9.jpg` | Pre-masked reference images |
 
 The checkpoint filenames do not fully describe their model tasks. Startup checks
 the actual loaded tasks and fails clearly for missing/incompatible assets or an
